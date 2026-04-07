@@ -4,7 +4,7 @@ import Link from "next/link";
 import { DashboardNavTabs } from "@/components/dashboard/DashboardNavTabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getOptionalServerSupabaseClient } from "@/lib/supabase";
+import { getOptionalServerSupabaseClient } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 

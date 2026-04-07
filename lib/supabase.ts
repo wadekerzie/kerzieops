@@ -1,6 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { cookies } from "next/headers";
-import { createBrowserClient, createServerClient } from "@supabase/ssr";
+import { createBrowserClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
 import type { BusinessUnit, Database } from "@/types";
@@ -30,51 +29,6 @@ export function getBrowserSupabaseClient() {
   invariantPublicEnv();
 
   return createBrowserClient<Database>(supabaseUrl!, supabaseAnonKey!);
-}
-
-export function getOptionalServerSupabaseClient() {
-  if (!hasPublicSupabaseEnv) {
-    return null;
-  }
-
-  const cookieStore = cookies();
-
-  return createServerClient<Database>(supabaseUrl!, supabaseAnonKey!, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(
-        cookiesToSet: Array<{
-          name: string;
-          value: string;
-          options?: object;
-        }>
-      ) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }: { name: string; value: string; options?: object }) => {
-            (cookieStore as unknown as { set: (cookieName: string, cookieValue: string, cookieOptions?: object) => void }).set(
-              name,
-              value,
-              options
-            );
-          });
-        } catch {
-          // Server Components cannot always write cookies. Supabase SSR docs recommend failing silently here.
-        }
-      }
-    }
-  });
-}
-
-export function getServerSupabaseClient() {
-  const client = getOptionalServerSupabaseClient();
-
-  if (!client) {
-    throw new Error("Supabase public environment variables are not configured.");
-  }
-
-  return client;
 }
 
 export function getServiceRoleSupabaseClient() {

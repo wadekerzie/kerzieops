@@ -1,6 +1,3 @@
-import { randomBytes } from "crypto";
-
-import { getServiceRoleSupabaseClient } from "@/lib/supabase";
 import type { BusinessUnit, Partner, StakeholderAccessToken } from "@/types";
 
 const TOKEN_PATTERN = /^[a-f0-9]{48}$/i;
@@ -27,6 +24,10 @@ export function getStakeholderSharePath(token: string) {
  * a stable URL and deactivate it only when the relationship changes.
  */
 export async function generateStakeholderToken(partnerId: string, businessUnitIds: string[]): Promise<string> {
+  const [{ randomBytes }, { getServiceRoleSupabaseClient }] = await Promise.all([
+    import("crypto"),
+    import("@/lib/supabase")
+  ]);
   const supabase = getServiceRoleSupabaseClient();
 
   if (!supabase) {
@@ -75,6 +76,7 @@ export async function validateToken(token: string): Promise<TokenValidationResul
     return null;
   }
 
+  const { getServiceRoleSupabaseClient } = await import("@/lib/supabase");
   const supabase = getServiceRoleSupabaseClient();
 
   if (!supabase) {
