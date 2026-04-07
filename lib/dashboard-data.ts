@@ -834,10 +834,24 @@ export async function getManagementDashboardData(): Promise<ManagementDashboardD
               }
             ];
           })()
-        : activeSplitsForUnit(baseData.partnerSplits, unit.id, currentDateString).map((split) => ({
-            partner_id: split.partner_id,
-            percentage: Number(split.percentage)
-          }));
+        : (() => {
+            const activeSplits = activeSplitsForUnit(baseData.partnerSplits, unit.id, currentDateString);
+
+            if (unit.slug === "silver_moon") {
+              const totalPercentage = activeSplits.reduce((sum, split) => sum + Number(split.percentage), 0);
+
+              return activeSplits.map((split) => ({
+                partner_id: split.partner_id,
+                percentage:
+                  totalPercentage > 0 ? roundCurrency((Number(split.percentage) / totalPercentage) * 100) : 0
+              }));
+            }
+
+            return activeSplits.map((split) => ({
+              partner_id: split.partner_id,
+              percentage: Number(split.percentage)
+            }));
+          })();
 
     const partnerPayouts: DashboardUnitPayout[] =
       currentMonthLedger.length > 0

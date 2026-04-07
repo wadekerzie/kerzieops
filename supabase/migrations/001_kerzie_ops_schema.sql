@@ -334,8 +334,8 @@ with split_seed as (
       ('unison', 'Gavin Matthews', 50.0000::numeric, null::text),
       ('gotaguuy', 'Wade Kerzie', 80.0000::numeric, null::text),
       ('gotaguuy', 'Gavin Matthews', 20.0000::numeric, null::text),
-      ('silver_moon', 'Wade Kerzie', 72.2500::numeric, 'Effective gross-equivalent share after Kerzie''s 15% top-line fee and Gavin''s carve-out from Wade''s net.'),
-      ('silver_moon', 'Gavin Matthews', 12.7500::numeric, 'Silver Moon logic: Gavin receives 15% of Wade''s post-Kerzie 85% net share, which equals 12.75% of gross.'),
+      ('silver_moon', 'Wade Kerzie', 85.0000::numeric, 'Silver Moon distributable pool reflects Kerzie''s commission pool. Wade receives 85% of that pool.'),
+      ('silver_moon', 'Gavin Matthews', 15.0000::numeric, 'Silver Moon distributable pool reflects Kerzie''s commission pool. Gavin receives the remaining 15% of that pool.'),
       ('kerzie_ai', 'Wade Kerzie', 80.0000::numeric, null::text),
       ('kerzie_ai', 'Gavin Matthews', 20.0000::numeric, null::text)
   ) as seed(slug, partner_name, percentage, notes)
