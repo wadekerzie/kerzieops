@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { DashboardNavTabs } from "@/components/dashboard/DashboardNavTabs";
 import { Badge } from "@/components/ui/badge";
@@ -51,7 +52,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   const email = user?.email?.toLowerCase();
 
-  if (!email || !MANAGEMENT_EMAILS.includes(email)) {
+  if (!email) {
+    redirect("/login");
+  }
+
+  if (!MANAGEMENT_EMAILS.includes(email)) {
     return (
       <AccessState
         title="Management access required"
