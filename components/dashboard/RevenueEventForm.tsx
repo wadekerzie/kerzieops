@@ -36,6 +36,7 @@ import {
 
 const schema = z.object({
   businessUnitId: z.string().uuid(),
+  revenueType: z.enum(["recurring", "one_time", "setup_fee", "commission"]),
   description: z.string().min(1),
   grossAmount: z.string().min(1),
   source: z.enum(["stripe", "ach", "check", "manual"]),
@@ -65,6 +66,7 @@ export function RevenueEventForm({
     resolver: zodResolver(schema),
     defaultValues: {
       businessUnitId: defaultBusinessUnitId ?? businessUnits[0]?.id ?? "",
+      revenueType: "one_time",
       description: "",
       grossAmount: "",
       source: "manual",
@@ -103,6 +105,7 @@ export function RevenueEventForm({
       setOpen(false);
       form.reset({
         businessUnitId: defaultBusinessUnitId ?? businessUnits[0]?.id ?? "",
+        revenueType: "one_time",
         description: "",
         grossAmount: "",
         source: "manual",

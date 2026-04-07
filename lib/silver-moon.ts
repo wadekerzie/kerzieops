@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import Stripe from "stripe";
 
-import { recalculateMonthlySnapshotForUnit } from "@/lib/dashboard-data";
+import { recalculateMonthlySnapshotForUnit } from "@/lib/finance-data";
 import {
   calculateStripeFeeAmount,
   calculateStripeFeePercentage,
@@ -14,6 +14,7 @@ import { getServiceRoleSupabaseClient } from "@/lib/supabase";
 import { roundCurrency } from "@/lib/utils";
 import type {
   BusinessUnit,
+  Json,
   RevenueEvent,
   RevenueEventInsert,
   SilverMoonExistingCustomer,
@@ -205,7 +206,7 @@ async function upsertWebhookEventRecord(log: {
     status: log.status,
     processed_at: log.processedAt ?? null,
     last_error: log.lastError ?? null,
-    payload: log.payload
+    payload: log.payload as Json
   };
   const { data, error } = await supabase
     .from("stripe_webhook_events")
@@ -380,12 +381,21 @@ export async function processSilverMoonPaymentRecord(
     revenueEvent = await createRevenueEvent({
       business_unit_id: unit.id,
       source: "stripe",
+      revenue_type: "one_time",
       gross_amount: payment.amount,
       platform_fee_percentage: feePercentage,
       transaction_date: transactionDate,
       description,
+      payment_method: "stripe",
+      customer_name: customerLabel,
       stripe_payment_id: payment.paymentId,
-      is_attributed: !existingCustomer
+      invoice_number: null,
+      notes: null,
+      is_attributed: !existingCustomer,
+      is_setup_fee: false,
+      is_pending_agreement: false,
+      review_status: "unreviewed",
+      review_notes: null
     });
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes("duplicate")) {
@@ -781,7 +791,7 @@ export async function getSilverMoonOperationsData(): Promise<SilverMoonOperation
       notes: customer.notes
     })),
     webhookStatus: {
-      lastWebhookReceivedAt: lastWebhookResult.data?.received_at ?? null,
+      lastWebhookReceivedAt: (lastWebhookResult.data as { received_at: string } | null)?.received_at ?? null,
       totalWebhooksReceived: totalWebhookResult.count ?? 0,
       failedWebhookCount: failedWebhookResult.count ?? 0,
       failedEvents: ((failedEventsResult.data ?? []) as Array<Pick<StripeWebhookEvent, "id" | "stripe_event_id" | "event_type" | "payment_id" | "received_at" | "last_error">>).map((event) => ({

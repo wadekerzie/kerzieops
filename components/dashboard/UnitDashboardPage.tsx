@@ -7,6 +7,7 @@ import { RevenueEventForm } from "@/components/dashboard/RevenueEventForm";
 import { WaterfallStepChart } from "@/components/dashboard/WaterfallStepChart";
 import { Button } from "@/components/ui/button";
 import { getUnitDashboardData } from "@/lib/dashboard-data";
+import { getSilverNaturalsAgreementStatus } from "@/lib/finance-data";
 import { formatCurrency } from "@/lib/utils";
 
 function SectionCard({
@@ -59,7 +60,10 @@ function MetricTile({
 }
 
 export async function UnitDashboardPage({ slug }: { slug: string }) {
-  const { currentMonthLabel, businessUnits, unit } = await getUnitDashboardData(slug);
+  const [{ currentMonthLabel, businessUnits, unit }, silverNaturalsAgreement] = await Promise.all([
+    getUnitDashboardData(slug),
+    slug === "silver_naturals" ? getSilverNaturalsAgreementStatus() : Promise.resolve(null)
+  ]);
 
   return (
     <main className="space-y-8">
@@ -81,6 +85,12 @@ export async function UnitDashboardPage({ slug }: { slug: string }) {
           </div>
         </div>
       </section>
+
+      {slug === "silver_naturals" && silverNaturalsAgreement && !silverNaturalsAgreement.finalized ? (
+        <section className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-100">
+          <p className="text-sm font-medium">{silverNaturalsAgreement.bannerMessage}</p>
+        </section>
+      ) : null}
 
       <div className="grid gap-8 xl:grid-cols-[1.25fr_0.75fr]">
         <SectionCard title="12-Month Revenue" description="Current month is highlighted in green.">

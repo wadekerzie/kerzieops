@@ -1,7 +1,9 @@
+import { SilverNaturalsAgreementForm } from "@/components/dashboard/SilverNaturalsAgreementForm";
 import { CopyTokenLinkButton } from "@/components/dashboard/CopyTokenLinkButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSilverNaturalsAgreementStatus } from "@/lib/finance-data";
 import { getStakeholderSettingsData } from "@/lib/stakeholder-data";
 import { getStakeholderSharePath } from "@/lib/tokens";
 
@@ -13,10 +15,19 @@ function formatDateTime(dateString: string) {
 }
 
 export async function StakeholderTokenSettings() {
-  const settings = await getStakeholderSettingsData();
+  const [settings, silverNaturalsAgreement] = await Promise.all([
+    getStakeholderSettingsData(),
+    getSilverNaturalsAgreementStatus()
+  ]);
 
   return (
     <main className="space-y-8">
+      <SilverNaturalsAgreementForm
+        finalized={silverNaturalsAgreement.finalized}
+        wadePercentage={silverNaturalsAgreement.wadePercentage}
+        gavinPercentage={silverNaturalsAgreement.gavinPercentage}
+      />
+
       <section className="overflow-hidden rounded-[2rem] border border-slate-800 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_35%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(3,7,18,0.94))] p-8 shadow-2xl shadow-slate-950/40">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
           <div className="max-w-3xl">

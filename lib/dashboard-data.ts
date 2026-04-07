@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 
 import { calculateCommissionAmount } from "@/lib/commission";
+import { recalculateMonthlySnapshotForUnit as recalculateMonthlySnapshotForUnitFinance } from "@/lib/finance-data";
 import { calculateWaterfall } from "@/lib/waterfall";
 import { roundCurrency } from "@/lib/utils";
 import { getServiceRoleSupabaseClient } from "@/lib/supabase";
@@ -806,6 +807,37 @@ export async function getManagementDashboardData(): Promise<ManagementDashboardD
 
       return entrySnapshot && entry.business_unit_id === unit.id;
     });
+    const derivedSplitRows =
+      unit.slug === "silver_naturals"
+        ? (() => {
+            const silverNaturalsConfig = [...baseData.configs]
+              .filter(
+                (config) =>
+                  config.business_unit_id === unit.id && config.config_key === "silver_naturals_wade_percentage"
+              )
+              .sort((left, right) => right.effective_date.localeCompare(left.effective_date))[0];
+            const wade = baseData.partners.find((partner) => partner.name === "Wade Kerzie");
+            const gavin = baseData.partners.find((partner) => partner.name === "Gavin Matthews");
+
+            if (!silverNaturalsConfig || silverNaturalsConfig.config_value === null || !wade || !gavin) {
+              return [] as Array<{ partner_id: string; percentage: number }>;
+            }
+
+            return [
+              {
+                partner_id: wade.id,
+                percentage: Number(silverNaturalsConfig.config_value)
+              },
+              {
+                partner_id: gavin.id,
+                percentage: roundCurrency(100 - Number(silverNaturalsConfig.config_value))
+              }
+            ];
+          })()
+        : activeSplitsForUnit(baseData.partnerSplits, unit.id, currentDateString).map((split) => ({
+            partner_id: split.partner_id,
+            percentage: Number(split.percentage)
+          }));
 
     const partnerPayouts: DashboardUnitPayout[] =
       currentMonthLedger.length > 0
@@ -823,14 +855,14 @@ export async function getManagementDashboardData(): Promise<ManagementDashboardD
               };
             })
             .sort((left, right) => right.amount - left.amount)
-        : activeSplitsForUnit(baseData.partnerSplits, unit.id, currentDateString).map((split) => {
+        : derivedSplitRows.map((split) => {
             const partner = partnerById.get(split.partner_id);
 
             return {
               partnerId: split.partner_id,
               partnerName: partner?.name ?? "Unknown partner",
-              percentage: Number(split.percentage),
-              amount: roundCurrency(distributablePool * (Number(split.percentage) / 100)),
+              percentage: split.percentage,
+              amount: roundCurrency(distributablePool * (split.percentage / 100)),
               source: "derived" as const,
               status: "projected" as const
             };
@@ -1131,117 +1163,5 @@ export async function getProformaDashboardData() {
 }
 
 export async function recalculateMonthlySnapshotForUnit(businessUnitId: string, monthDate: string) {
-  const supabase = ensureSupabase();
-  const targetDate = new Date(`${monthDate}T00:00:00`);
-  const monthStart = getMonthStart(targetDate);
-  const monthKey = toMonthKey(monthStart);
-  const monthStartString = toDateString(monthStart);
-  const monthEnd = addMonths(monthStart, 1);
-
-  const baseData = await fetchDashboardBaseData();
-  const unit = baseData.businessUnits.find((entry) => entry.id === businessUnitId);
-
-  if (!unit) {
-    throw new Error("Business unit not found for monthly snapshot recalculation.");
-  }
-
-  const currentMonthRevenue = baseData.revenueEvents.filter(
-    (event) => getMonthKeyFromDateString(event.transaction_date) === monthKey
-  );
-  const currentMonthExpenses = baseData.expenses.filter(
-    (expense) => getMonthKeyFromDateString(expense.expense_date) === monthKey
-  );
-
-  const unitRevenueThisMonth = currentMonthRevenue.filter((event) => event.business_unit_id === businessUnitId);
-  const unitExpensesThisMonth = currentMonthExpenses.filter((expense) => expense.business_unit_id === businessUnitId);
-  const totalCurrentGross = roundCurrency(
-    currentMonthRevenue.reduce((sum, event) => sum + Number(event.gross_amount), 0)
-  );
-  const globalOpsTaxThisMonth = roundCurrency(
-    currentMonthExpenses
-      .filter((expense) => expense.business_unit_id === null && expense.category === "ops_tax")
-      .reduce((sum, expense) => sum + Number(expense.amount), 0)
-  );
-  const unitGrossThisMonth = roundCurrency(
-    unitRevenueThisMonth.reduce((sum, event) => sum + Number(event.gross_amount), 0)
-  );
-  const allocatedGlobalOpsTax = baseData.businessUnits.length
-    ? roundCurrency(
-        totalCurrentGross > 0
-          ? globalOpsTaxThisMonth * (unitGrossThisMonth / totalCurrentGross)
-          : globalOpsTaxThisMonth / baseData.businessUnits.length
-      )
-    : 0;
-  const unitOpsTaxThisMonth = roundCurrency(
-    unitExpensesThisMonth
-      .filter((expense) => expense.category === "ops_tax")
-      .reduce((sum, expense) => sum + Number(expense.amount), 0)
-  );
-  const marketingFundPercentage = pickConfigValue(baseData.configs, businessUnitId, "marketing_fund_percentage", 10);
-  const operatingReservePercentage = pickConfigValue(baseData.configs, businessUnitId, "operating_reserve_percentage", 12);
-  const marketingContributionsApplied = roundCurrency(
-    baseData.marketingContributions
-      .filter(
-        (contribution) =>
-          contribution.business_unit_id === businessUnitId &&
-          contribution.is_recovered &&
-          contribution.recovery_date !== null &&
-          getMonthKeyFromDateString(contribution.recovery_date) === monthKey
-      )
-      .reduce((sum, contribution) => sum + Number(contribution.amount), 0)
-  );
-
-  const waterfall = calculateWaterfall({
-    revenueEvents: unitRevenueThisMonth.map((event) => ({
-      grossAmount: Number(event.gross_amount),
-      platformFeeAmount: Number(event.platform_fee_amount)
-    })),
-    expenses: [
-      ...unitExpensesThisMonth
-        .filter((expense) => expense.category === "variable")
-        .map((expense) => ({
-          amount: Number(expense.amount),
-          category: "variable" as const
-        })),
-      {
-        amount: roundCurrency(unitOpsTaxThisMonth + allocatedGlobalOpsTax),
-        category: "ops_tax" as const
-      }
-    ],
-    marketingFundPercentage,
-    operatingReservePercentage,
-    marketingContributionsApplied
-  });
-
-  const snapshotInsert: MonthlySnapshotInsert = {
-    business_unit_id: businessUnitId,
-    snapshot_month: monthStartString,
-    gross_revenue: waterfall.grossRevenue,
-    platform_fees: waterfall.platformFees,
-    variable_costs: waterfall.variableCosts,
-    ops_tax_allocated: waterfall.opsTaxAllocated,
-    marketing_fund: waterfall.marketingFund,
-    operating_reserve: waterfall.operatingReserve,
-    marketing_contributions_applied: waterfall.marketingContributionsApplied,
-    distributable_pool: waterfall.distributablePool
-  };
-
-  const { error } = await supabase.from("monthly_snapshots").upsert(
-    snapshotInsert as never,
-    {
-      onConflict: "business_unit_id,snapshot_month"
-    }
-  );
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return {
-    businessUnitId,
-    businessUnitSlug: unit.slug,
-    monthStart: monthStartString,
-    monthEnd: toDateString(monthEnd),
-    waterfall
-  };
+  return recalculateMonthlySnapshotForUnitFinance(businessUnitId, monthDate);
 }

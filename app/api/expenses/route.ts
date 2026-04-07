@@ -2,16 +2,27 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { recalculateMonthlySnapshotForUnit } from "@/lib/dashboard-data";
+import {
+  assertMonthUnlocked,
+  buildExpenseInsert,
+  fetchFinanceBaseData,
+  generateSnapshotsForMonth,
+  recalculateMonthlySnapshotForUnit
+} from "@/lib/finance-data";
 import { getServiceRoleSupabaseClient } from "@/lib/supabase";
-import type { ExpenseInsert } from "@/types";
 
 const payloadSchema = z.object({
   businessUnitId: z.string().min(1),
   category: z.enum(["ops_tax", "marketing", "reserve", "variable", "capital", "one_time"]),
-  vendor: z.string().min(1),
+  vendor: z.string().optional().or(z.literal("")),
   amount: z.coerce.number().min(0),
-  expenseDate: z.string().min(1)
+  expenseDate: z.string().min(1),
+  isRecurring: z.boolean().default(false),
+  recurrenceInterval: z.enum(["monthly", "annual", "one_time"]).default("one_time"),
+  description: z.string().min(1),
+  receiptUrl: z.string().optional().or(z.literal("")),
+  nextBillingDate: z.string().optional().or(z.literal("")),
+  adminOverride: z.boolean().optional()
 });
 
 export async function POST(request: Request) {
@@ -23,23 +34,31 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const payload = payloadSchema.parse(body);
+
+  try {
+    await assertMonthUnlocked(payload.expenseDate, payload.adminOverride ?? false);
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "This month is locked." },
+      { status: 400 }
+    );
+  }
+
   const businessUnitId = payload.businessUnitId === "global" ? null : payload.businessUnitId;
-  const expenseInsert: ExpenseInsert = {
-    business_unit_id: businessUnitId,
+  const expenseInsert = buildExpenseInsert({
+    businessUnitId,
     category: payload.category,
     amount: payload.amount,
-    description: `${payload.vendor} ${payload.category.replace("_", " ")} expense`,
+    description: payload.description,
     vendor: payload.vendor,
-    expense_date: payload.expenseDate,
-    is_recurring: false,
-    recurrence_interval: "one_time"
-  };
+    expenseDate: payload.expenseDate,
+    isRecurring: payload.isRecurring,
+    recurrenceInterval: payload.isRecurring ? payload.recurrenceInterval : "one_time",
+    receiptUrl: payload.receiptUrl,
+    nextBillingDate: payload.nextBillingDate || null
+  });
 
-  const { data, error } = await supabase
-    .from("expenses")
-    .insert(expenseInsert as never)
-    .select("id")
-    .single<{ id: string }>();
+  const { data, error } = await supabase.from("expenses").insert(expenseInsert as never).select("id").single<{ id: string }>();
 
   if (error) {
     return NextResponse.json({ message: error.message }, { status: 400 });
@@ -47,10 +66,23 @@ export async function POST(request: Request) {
 
   if (businessUnitId) {
     await recalculateMonthlySnapshotForUnit(businessUnitId, payload.expenseDate);
+  } else {
+    await generateSnapshotsForMonth(payload.expenseDate);
   }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/expenses");
+  revalidatePath("/dashboard/close");
+
+  const baseData = await fetchFinanceBaseData();
+
+  for (const unit of baseData.businessUnits) {
+    if (unit.slug === "zorli") revalidatePath("/dashboard/zorli");
+    if (unit.slug === "gotaguuy") revalidatePath("/dashboard/gotaguuy");
+    if (unit.slug === "unison") revalidatePath("/dashboard/unison");
+    if (unit.slug === "silver_moon") revalidatePath("/dashboard/silver-moon");
+    if (unit.slug === "silver_naturals") revalidatePath("/dashboard/silver-naturals");
+  }
 
   return NextResponse.json({
     ok: true,

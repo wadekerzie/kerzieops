@@ -2,19 +2,39 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { recalculateMonthlySnapshotForUnit } from "@/lib/dashboard-data";
+import {
+  assertMonthUnlocked,
+  buildManualRevenueInsert,
+  calculateMonthlySnapshotFromBase,
+  fetchFinanceBaseData,
+  getSilverNaturalsAgreementStatus,
+  recalculateMonthlySnapshotForUnit
+} from "@/lib/finance-data";
 import { getServiceRoleSupabaseClient } from "@/lib/supabase";
-import type { RevenueEventInsert } from "@/types";
 
 const payloadSchema = z.object({
   businessUnitId: z.string().uuid(),
   source: z.enum(["stripe", "ach", "check", "manual"]),
+  revenueType: z.enum(["recurring", "one_time", "setup_fee", "commission"]),
   grossAmount: z.coerce.number().min(0),
+  paymentMethod: z.enum(["ach", "check", "stripe", "cash"]).nullable().optional(),
   transactionDate: z.string().min(1),
-  description: z.string().min(1),
+  customerName: z.string().optional().or(z.literal("")),
+  description: z.string().optional().or(z.literal("")),
+  invoiceNumber: z.string().optional().or(z.literal("")),
+  notes: z.string().optional().or(z.literal("")),
   stripePaymentId: z.string().optional().or(z.literal("")),
-  isAttributed: z.boolean().optional()
+  isAttributed: z.boolean().optional(),
+  isSetupFee: z.boolean().optional(),
+  adminOverride: z.boolean().optional()
 });
+
+function payoutAmountByName(rows: Array<{ name: string; amount: number }>) {
+  return {
+    wade: rows.find((row) => row.name === "Wade Kerzie")?.amount ?? 0,
+    gavin: rows.find((row) => row.name === "Gavin Matthews")?.amount ?? 0
+  };
+}
 
 export async function POST(request: Request) {
   const supabase = getServiceRoleSupabaseClient();
@@ -25,16 +45,37 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const payload = payloadSchema.parse(body);
-  const revenueEventInsert: RevenueEventInsert = {
-    business_unit_id: payload.businessUnitId,
+
+  try {
+    await assertMonthUnlocked(payload.transactionDate, payload.adminOverride ?? false);
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "This month is locked." },
+      { status: 400 }
+    );
+  }
+
+  const baseData = await fetchFinanceBaseData();
+  const beforeSnapshot = calculateMonthlySnapshotFromBase(baseData, payload.businessUnitId, payload.transactionDate);
+  const silverNaturalsAgreement = await getSilverNaturalsAgreementStatus();
+  const isPendingAgreement =
+    payload.businessUnitId === silverNaturalsAgreement.businessUnitId && !silverNaturalsAgreement.finalized;
+  const revenueEventInsert = buildManualRevenueInsert({
+    businessUnitId: payload.businessUnitId,
     source: payload.source,
-    gross_amount: payload.grossAmount,
-    platform_fee_percentage: 0,
-    transaction_date: payload.transactionDate,
+    revenueType: payload.revenueType,
+    grossAmount: payload.grossAmount,
+    paymentMethod: payload.paymentMethod ?? null,
+    transactionDate: payload.transactionDate,
+    customerName: payload.customerName,
     description: payload.description,
-    stripe_payment_id: payload.stripePaymentId || null,
-    is_attributed: payload.isAttributed ?? false
-  };
+    invoiceNumber: payload.invoiceNumber,
+    notes: payload.notes,
+    stripePaymentId: payload.stripePaymentId,
+    isAttributed: payload.isAttributed,
+    isSetupFee: payload.isSetupFee || payload.revenueType === "setup_fee",
+    isPendingAgreement
+  });
 
   const { data: insertedEvent, error } = await supabase
     .from("revenue_events")
@@ -47,10 +88,24 @@ export async function POST(request: Request) {
   }
 
   const snapshotResult = await recalculateMonthlySnapshotForUnit(payload.businessUnitId, payload.transactionDate);
+  const beforeByName = payoutAmountByName(beforeSnapshot.partnerPayouts);
+  const afterByName = payoutAmountByName(snapshotResult.partnerPayouts);
+  const payoutDelta = snapshotResult.agreementPending
+    ? {
+        wade: null,
+        gavin: null
+      }
+    : {
+        wade: Number((afterByName.wade - beforeByName.wade).toFixed(2)),
+        gavin: Number((afterByName.gavin - beforeByName.gavin).toFixed(2))
+      };
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/expenses");
   revalidatePath("/dashboard/proforma");
+  revalidatePath("/dashboard/revenue/new");
+  revalidatePath("/dashboard/close");
+  revalidatePath("/dashboard/settings");
 
   if (snapshotResult.businessUnitSlug === "zorli") revalidatePath("/dashboard/zorli");
   if (snapshotResult.businessUnitSlug === "gotaguuy") revalidatePath("/dashboard/gotaguuy");
@@ -61,6 +116,11 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     revenueEventId: insertedEvent?.id ?? null,
-    snapshot: snapshotResult
+    snapshot: snapshotResult,
+    payoutDelta,
+    confirmation:
+      snapshotResult.agreementPending || payoutDelta.wade === null || payoutDelta.gavin === null
+        ? "Revenue saved. Silver Naturals payouts remain suspended until the agreement percentage is finalized."
+        : `This revenue generates $${payoutDelta.wade.toFixed(2)} for Wade and $${payoutDelta.gavin.toFixed(2)} for Gavin.`
   });
 }

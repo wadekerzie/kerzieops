@@ -8,13 +8,16 @@ export type Json =
 
 export type PartnerRole = "owner" | "partner" | "contractor" | "client";
 export type RevenueSource = "stripe" | "ach" | "check" | "manual";
+export type ManualRevenueType = "recurring" | "one_time" | "setup_fee" | "commission";
 export type ExpenseCategory = "ops_tax" | "marketing" | "reserve" | "variable" | "capital" | "one_time";
 export type RecurrenceInterval = "monthly" | "annual" | "one_time";
 export type ContributionType = "cash" | "sweat_equity";
 export type ScoutCommissionStatus = "pending" | "paid" | "held";
 export type CustomerContractStatus = "active" | "cancelled" | "paused";
-export type PaymentMethod = "ach" | "check" | "stripe";
+export type PaymentMethod = "ach" | "check" | "stripe" | "cash";
 export type LedgerStatus = "pending" | "paid";
+export type RevenueReviewStatus = "unreviewed" | "confirmed" | "flagged";
+export type ConsultingProjectStatus = "active" | "complete" | "paused";
 export type StripeWebhookEventSource = "webhook" | "sync" | "retry";
 export type StripeWebhookEventStatus = "received" | "processed" | "failed" | "ignored";
 
@@ -54,14 +57,23 @@ export interface RevenueEvent {
   id: string;
   business_unit_id: string;
   source: RevenueSource;
+  revenue_type: ManualRevenueType;
   gross_amount: number;
   platform_fee_percentage: number;
   platform_fee_amount: number;
   net_after_platform: number;
   transaction_date: string;
   description: string | null;
+  payment_method: PaymentMethod | null;
+  customer_name: string | null;
   stripe_payment_id: string | null;
+  invoice_number: string | null;
+  notes: string | null;
   is_attributed: boolean;
+  is_setup_fee: boolean;
+  is_pending_agreement: boolean;
+  review_status: RevenueReviewStatus;
+  review_notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +88,9 @@ export interface Expense {
   expense_date: string;
   is_recurring: boolean;
   recurrence_interval: RecurrenceInterval;
+  receipt_url: string | null;
+  is_active: boolean;
+  next_billing_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -196,7 +211,54 @@ export interface MonthlySnapshot {
   marketing_fund: number;
   operating_reserve: number;
   marketing_contributions_applied: number;
+  setup_fee_revenue: number;
+  setup_fee_distributable_pool: number;
   distributable_pool: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsultingProject {
+  id: string;
+  business_unit_id: string;
+  project_name: string;
+  client_name: string;
+  project_value: number;
+  start_date: string;
+  end_date: string | null;
+  status: ConsultingProjectStatus;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsultingProjectPayment {
+  id: string;
+  project_id: string;
+  amount: number;
+  payment_date: string;
+  description: string | null;
+  invoice_number: string | null;
+  notes: string | null;
+  revenue_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MonthlyClose {
+  id: string;
+  close_month: string;
+  revenue_review_completed: boolean;
+  recurring_expenses_confirmed: boolean;
+  commissions_review_completed: boolean;
+  snapshot_generated: boolean;
+  payouts_calculated: boolean;
+  pdf_exported: boolean;
+  is_locked: boolean;
+  locked_at: string | null;
+  locked_by_email: string | null;
+  anomaly_notes: string | null;
+  admin_override_note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -375,6 +437,9 @@ export type ProformaScenarioInsert = Omit<ProformaScenario, "id" | "created_at" 
 export type MonthlySnapshotInsert = Omit<MonthlySnapshot, "id" | "created_at" | "updated_at">;
 export type PayoutLedgerInsert = Omit<PayoutLedger, "id" | "created_at" | "updated_at">;
 export type StakeholderAccessTokenInsert = Omit<StakeholderAccessToken, "id" | "token" | "created_at" | "updated_at">;
+export type ConsultingProjectInsert = Omit<ConsultingProject, "id" | "created_at" | "updated_at">;
+export type ConsultingProjectPaymentInsert = Omit<ConsultingProjectPayment, "id" | "created_at" | "updated_at">;
+export type MonthlyCloseInsert = Omit<MonthlyClose, "id" | "created_at" | "updated_at">;
 export type SilverMoonExistingCustomerInsert = Omit<SilverMoonExistingCustomer, "id" | "created_at">;
 export type StripeWebhookEventInsert = Omit<StripeWebhookEvent, "id" | "received_at" | "created_at" | "updated_at">;
 
@@ -425,6 +490,17 @@ export interface Database {
         StakeholderAccessTokenInsert,
         Partial<StakeholderAccessTokenInsert>
       >;
+      consulting_projects: TableDefinition<
+        ConsultingProject,
+        ConsultingProjectInsert,
+        Partial<ConsultingProjectInsert>
+      >;
+      consulting_project_payments: TableDefinition<
+        ConsultingProjectPayment,
+        ConsultingProjectPaymentInsert,
+        Partial<ConsultingProjectPaymentInsert>
+      >;
+      monthly_closes: TableDefinition<MonthlyClose, MonthlyCloseInsert, Partial<MonthlyCloseInsert>>;
       silver_moon_existing_customers: TableDefinition<
         SilverMoonExistingCustomer,
         SilverMoonExistingCustomerInsert,
